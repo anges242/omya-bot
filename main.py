@@ -4,7 +4,7 @@ import asyncio
 from datetime import datetime
 import anthropic
 from telegram import Update
-from telegram.ext import Application, MessageHandler, filters, ContextTypes
+from telegram.ext import Application, MessageHandler, filters, ContextTypes, ApplicationBuilder
 from notion_client import Client as NotionClient
 
 # Configuration
