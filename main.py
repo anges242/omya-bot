@@ -1,13 +1,11 @@
 import os
 import json
-import asyncio
 from datetime import datetime
 import anthropic
 from telegram import Update
 from telegram.ext import Application, MessageHandler, filters, ContextTypes
 from notion_client import Client as NotionClient
 
-# Configuration
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY")
 NOTION_TOKEN = os.environ.get("NOTION_TOKEN")
@@ -21,42 +19,31 @@ anthropic_client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
 
 SYSTEM_PROMPT = """Tu es l'assistant de gestion OMYA. Tu aides à gérer une entreprise de formation et services digitaux à Pointe-Noire, Congo.
 
-Tu reçois des messages en français naturel et tu dois retourner un JSON structuré.
+Tu reçois des messages en français naturel et tu retournes UNIQUEMENT un JSON valide, sans texte avant ou après.
 
-ACTIONS DISPONIBLES:
-- "add_transaction": ajouter revenus ou dépenses
-- "add_client": ajouter apprenant ou client digital
-- "add_session": créer une session de formation
-- "add_infra": ajouter matériel ou fournisseur
-- "query_transactions": consulter finances
-- "query_clients": consulter clients
-- "query_sessions": consulter sessions
-- "daily_report": rapport du jour
-- "unknown": message incompréhensible
+ACTIONS: add_transaction, add_client, add_session, daily_report, query_clients, unknown
 
 TYPES TRANSACTION: Revenu Formation, Revenu Digital, Dépense, Transfert
 CANAUX: Cash, Orange Money, MTN MoMo
-CATÉGORIES DÉPENSES: Fournitures, Internet, Transport, Loyer, Matériel, Marketing, Salaire, Imprévu
+CATÉGORIES: Fournitures, Internet, Transport, Loyer, Matériel, Marketing, Salaire, Imprévu, Formation, Digital
 MODULES: Word, Excel, PowerPoint, Windows, IA
-SERVICES DIGITAUX: Site Vitrine, Agent WhatsApp, Pack Notion
-
-Réponds UNIQUEMENT en JSON valide, sans texte avant ou après.
+SERVICES: Site Vitrine, Agent WhatsApp, Pack Notion
 
 EXEMPLES:
-Message: "Reçu 25000F de Jean Moukala pour formation Word en cash"
-Réponse: {"action":"add_transaction","data":{"libelle":"Paiement Word - Jean Moukala","type":"Revenu Formation","montant":25000,"canal":"Cash","categorie":"Formation","notes":"Jean Moukala"},"message":"✅ PAIEMENT ENREGISTRÉ\n👤 Jean Moukala\n📚 Word\n💵 25 000 F\n💳 Cash"}
+Message: "Reçu 25000F de Jean pour Word en cash"
+JSON: {"action":"add_transaction","data":{"libelle":"Paiement Word - Jean","type":"Revenu Formation","montant":25000,"canal":"Cash","categorie":"Formation","notes":"Jean"},"message":"✅ PAIEMENT ENREGISTRÉ\n👤 Jean\n📚 Word\n💵 25 000 F\n💳 Cash"}
 
-Message: "Dépense internet Airtel 20000F"
-Réponse: {"action":"add_transaction","data":{"libelle":"Internet Airtel","type":"Dépense","montant":20000,"canal":"Cash","categorie":"Internet","notes":"Mensuel"},"message":"✅ DÉPENSE ENREGISTRÉE\n📂 Internet\n💸 20 000 F"}
+Message: "Dépense internet 20000F"
+JSON: {"action":"add_transaction","data":{"libelle":"Internet mensuel","type":"Dépense","montant":20000,"canal":"Cash","categorie":"Internet","notes":""},"message":"✅ DÉPENSE ENREGISTRÉE\n📂 Internet\n💸 20 000 F"}
 
-Message: "Nouvelle inscription Paul Banzouzi PowerPoint 35000F acompte 20000F"
-Réponse: {"action":"add_client","data":{"nom":"Paul Banzouzi","type":"Apprenant","service":"PowerPoint","montant_total":35000,"montant_paye":20000,"reste_du":15000,"statut_paiement":"Partiel","statut":"Actif"},"message":"✅ INSCRIPTION\n👤 Paul Banzouzi\n📚 PowerPoint\n💰 35 000 F\n💵 Payé: 20 000 F\n🔴 Reste: 15 000 F"}
+Message: "Nouvelle inscription Paul PowerPoint 35000F acompte 20000F"
+JSON: {"action":"add_client","data":{"nom":"Paul","type":"Apprenant","service":"PowerPoint","montant_total":35000,"montant_paye":20000,"reste_du":15000,"statut_paiement":"Partiel","statut":"Actif","notes":""},"message":"✅ INSCRIPTION\n👤 Paul\n📚 PowerPoint\n💰 35 000 F\n💵 Payé: 20 000 F\n🔴 Reste: 15 000 F"}
 
 Message: "rapport du jour"
-Réponse: {"action":"daily_report","data":{},"message":""}
+JSON: {"action":"daily_report","data":{},"message":""}
 
 Message: "liste clients"
-Réponse: {"action":"query_clients","data":{},"message":""}"""
+JSON: {"action":"query_clients","data":{},"message":""}"""
 
 
 async def parse_message(text: str) -> dict:
@@ -68,7 +55,8 @@ async def parse_message(text: str) -> dict:
     )
     content = response.content[0].text.strip()
     if "```" in content:
-        content = content.split("```")[1]
+        parts = content.split("```")
+        content = parts[1] if len(parts) > 1 else content
         if content.startswith("json"):
             content = content[4:]
     return json.loads(content.strip())
@@ -217,13 +205,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text(message)
         elif action == "add_session":
             add_session(data)
-            await update.message.reply_text(message)
+            await update.message.reply_text(message or "✅ Session enregistrée")
         elif action == "daily_report":
-            rapport = get_daily_report()
-            await update.message.reply_text(rapport)
+            await update.message.reply_text(get_daily_report())
         elif action == "query_clients":
-            liste = get_clients_list()
-            await update.message.reply_text(liste)
+            await update.message.reply_text(get_clients_list())
         elif action == "unknown":
             await update.message.reply_text(
                 "❓ Je n'ai pas compris. Essaie:\n"
@@ -235,7 +221,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:
             await update.message.reply_text(f"✅ {message}")
     except Exception as e:
-        await update.message.reply_text(f"❌ Erreur: {str(e)}")
+        await update.message.reply_text(f"❌ Erreur: {str(e)}\nRéessaie avec un message plus simple.")
 
 
 def main():
